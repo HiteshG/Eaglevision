@@ -291,7 +291,7 @@ MainConfig          # Combined configuration
 4. **Geometry-Based Synthesis**:
    - Line fitting through coplanar points
    - Line intersection for missing keypoints
-   - Keypoint recall improvement
+   - Keypoint recall improvementk
 
 5. **Keypoint Calibration**:
    - Brightness-based micro-adjustment

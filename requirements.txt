@@ -12,6 +12,11 @@ ultralytics>=8.0.0
 # Tracking
 boxmot>=10.0.0
 
+# Team assignment with embeddings
+transformers>=4.30.0
+umap-learn>=0.5.3
+pillow>=10.0.0
+
 # Utilities
 tqdm>=4.65.0
 

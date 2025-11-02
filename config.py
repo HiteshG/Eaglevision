@@ -46,9 +46,22 @@ class TrackerConfig:
 @dataclass
 class TeamAssignerConfig:
     """Configuration for team assignment."""
+    team_method: str = "color"  # "color" or "embedding"
     n_clusters: int = 2  # Number of teams
     overlap_threshold: float = 0.35  # Ignore detections with high overlap
+    
+    # Color-based settings
     color_ranges: dict = None  # HSV color ranges for detection
+    
+    # Embedding-based settings
+    embedding_model: str = "google/siglip-base-patch16-224"
+    embedding_batch_size: int = 256
+    shrink_scale: float = 0.7  # Shrink bbox to focus on jersey
+    stride: int = 3  # Sample every N frames for training
+    device: Optional[str] = None
+    
+    # Tracker memory settings
+    memory_decay_frames: int = 150  # Reset team after N frames of inactivity
     
     def __post_init__(self):
         if self.color_ranges is None:
@@ -66,6 +79,9 @@ class TeamAssignerConfig:
                 "gray": [(0, 0, 50), (180, 30, 200)],
                 "black": [(0, 0, 0), (180, 255, 50)],
             }
+        
+        if self.device is None:
+            self.device = DetectorConfig._get_device()
 
 
 @dataclass

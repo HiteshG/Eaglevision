@@ -1,29 +1,31 @@
 """
 Object Tracker Module.
 Wraps BoTSORT for tracking detected objects across frames.
-Designed to be easily swappable with other tracking algorithms.
+Includes team memory to maintain team assignments across frames.
 """
 import numpy as np
 from boxmot import BotSort
 from pathlib import Path
-from typing import Dict, List, Tuple
-from .config import TrackerConfig
+from typing import Dict, List, Tuple, Optional
+from config import TrackerConfig
 
 
 class ObjectTracker:
     """
-    Wrapper for BoTSORT tracker.
-    Can be easily replaced with ByteTrack, StrongSORT, or custom trackers.
+    Wrapper for BoTSORT tracker with team memory support.
     """
     
-    def __init__(self, config: TrackerConfig):
+    def __init__(self, config: TrackerConfig, memory_decay_frames: int = 150):
         """
         Initialize tracker with configuration.
         
         Args:
             config: TrackerConfig object with tracker settings
+            memory_decay_frames: Number of frames before forgetting team assignment
         """
         self.config = config
+        self.memory_decay_frames = memory_decay_frames
+        
         print(f"Loading tracker: {config.tracker_type} on device: {config.device}")
         
         # Convert device string to format expected by boxmot
@@ -41,6 +43,10 @@ class ObjectTracker:
             half=False
         )
         
+        # Team memory: {track_id: (team_id, last_seen_frame)}
+        self.team_memory: Dict[int, Tuple[int, int]] = {}
+        self.current_frame_idx = 0
+        
     def update(
         self,
         detections: np.ndarray,
@@ -54,11 +60,17 @@ class ObjectTracker:
             frame: Current frame in BGR format (H, W, 3)
             
         Returns:
-            List of tracked objects, each as:
-            [x1, y1, x2, y2, track_id, conf, class_idx, detection_idx]
+            List of tracked objects
         """
         try:
             tracks = self.tracker.update(detections, frame)
+            
+            # Update frame counter
+            self.current_frame_idx += 1
+            
+            # Clean up old memory entries
+            self._cleanup_memory()
+            
             return tracks
         except Exception as e:
             print(f"Tracker error: {e}")
@@ -128,32 +140,93 @@ class ObjectTracker:
         
         return result
     
+    def update_team_memory(self, track_id: int, team_id: int):
+        """
+        Update team memory for a track ID.
+        
+        Args:
+            track_id: Track ID
+            team_id: Team ID (0 or 1)
+        """
+        self.team_memory[track_id] = (team_id, self.current_frame_idx)
+    
+    def get_team_from_memory(self, track_id: int) -> Optional[int]:
+        """
+        Get team assignment from memory.
+        
+        Args:
+            track_id: Track ID
+            
+        Returns:
+            Team ID if in memory and not expired, else None
+        """
+        if track_id not in self.team_memory:
+            return None
+        
+        team_id, last_seen = self.team_memory[track_id]
+        
+        # Check if memory has expired
+        if self.current_frame_idx - last_seen > self.memory_decay_frames:
+            # Remove from memory
+            del self.team_memory[track_id]
+            return None
+        
+        return team_id
+    
+    def get_all_team_assignments(self) -> Dict[int, int]:
+        """
+        Get all current team assignments from memory.
+        
+        Returns:
+            Dictionary mapping track_id -> team_id
+        """
+        assignments = {}
+        for track_id, (team_id, last_seen) in self.team_memory.items():
+            if self.current_frame_idx - last_seen <= self.memory_decay_frames:
+                assignments[track_id] = team_id
+        return assignments
+    
+    def _cleanup_memory(self):
+        """Remove expired entries from team memory."""
+        expired_ids = [
+            track_id for track_id, (_, last_seen) in self.team_memory.items()
+            if self.current_frame_idx - last_seen > self.memory_decay_frames
+        ]
+        
+        for track_id in expired_ids:
+            del self.team_memory[track_id]
+    
     def reset(self):
-        """Reset tracker state."""
+        """Reset tracker state and team memory."""
         self.tracker = BotSort(
             reid_weights=Path(self.config.reid_weights),
             device=self.config.device if self.config.device != "mps" else "cpu",
             half=False
         )
+        self.team_memory = {}
+        self.current_frame_idx = 0
     
     def __repr__(self):
-        return f"ObjectTracker(type={self.config.tracker_type})"
+        return f"ObjectTracker(type={self.config.tracker_type}, memory_size={len(self.team_memory)})"
 
 
 class SimpleTracker:
     """
-    Simple IoU-based tracker as fallback.
-    Can be used if BoTSORT is not available.
+    Simple IoU-based tracker as fallback with team memory support.
     """
     
-    def __init__(self):
+    def __init__(self, memory_decay_frames: int = 150):
         self.next_id = 0
         self.tracks = {}
         self.iou_threshold = 0.3
+        self.memory_decay_frames = memory_decay_frames
+        self.team_memory: Dict[int, Tuple[int, int]] = {}
+        self.current_frame_idx = 0
         
     def update(self, detections: np.ndarray, frame: np.ndarray) -> np.ndarray:
         """Simple IoU-based tracking."""
         if len(detections) == 0:
+            self.current_frame_idx += 1
             return np.array([])
         
         boxes = detections[:, :4]
@@ -188,7 +261,45 @@ class SimpleTracker:
                 track_id, conf, cls, i
             ])
         
+        self.current_frame_idx += 1
+        self._cleanup_memory()
+        
         return np.array(results)
+    
+    def update_team_memory(self, track_id: int, team_id: int):
+        """Update team memory for a track ID."""
+        self.team_memory[track_id] = (team_id, self.current_frame_idx)
+    
+    def get_team_from_memory(self, track_id: int) -> Optional[int]:
+        """Get team assignment from memory."""
+        if track_id not in self.team_memory:
+            return None
+        
+        team_id, last_seen = self.team_memory[track_id]
+        
+        if self.current_frame_idx - last_seen > self.memory_decay_frames:
+            del self.team_memory[track_id]
+            return None
+        
+        return team_id
+    
+    def get_all_team_assignments(self) -> Dict[int, int]:
+        """Get all current team assignments from memory."""
+        assignments = {}
+        for track_id, (team_id, last_seen) in self.team_memory.items():
+            if self.current_frame_idx - last_seen <= self.memory_decay_frames:
+                assignments[track_id] = team_id
+        return assignments
+    
+    def _cleanup_memory(self):
+        """Remove expired entries from team memory."""
+        expired_ids = [
+            track_id for track_id, (_, last_seen) in self.team_memory.items()
+            if self.current_frame_idx - last_seen > self.memory_decay_frames
+        ]
+        
+        for track_id in expired_ids:
+            del self.team_memory[track_id]
     
     def _calculate_iou(self, box1, box2):
         """Calculate IoU between two boxes."""
@@ -208,3 +319,5 @@ class SimpleTracker:
         """Reset tracker."""
         self.next_id = 0
         self.tracks = {}
+        self.team_memory = {}
+        self.current_frame_idx = 0

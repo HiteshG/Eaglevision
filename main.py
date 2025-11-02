@@ -1,6 +1,6 @@
 """
 Main script for football player tracking.
-Orchestrates detection, tracking, team assignment, and visualization.
+Orchestrates detection, tracking, team assignment (with memory), and visualization.
 """
 import os
 import sys
@@ -12,13 +12,14 @@ from processor import DataProcessor
 from visualizer import Visualizer
 from tracker import ObjectTracker
 from detector import ObjectDetector
-from team_assigner import TeamAssigner
+from team_assigner import create_team_assigner, resolve_goalkeepers_team_id
 from config import MainConfig
 from utils import read_video, create_output_directory, save_tracking_data, print_summary
 
+
 class FootballTracker:
     """
-    Main tracking pipeline that coordinates all components.
+    Main tracking pipeline with team memory support.
     """
     
     def __init__(self, config: MainConfig = None):
@@ -36,8 +37,11 @@ class FootballTracker:
         print("="*50 + "\n")
         
         self.detector = ObjectDetector(self.config.detector)
-        self.tracker = ObjectTracker(self.config.tracker)
-        self.team_assigner = TeamAssigner(self.config.team_assigner)
+        self.tracker = ObjectTracker(
+            self.config.tracker,
+            memory_decay_frames=self.config.team_assigner.memory_decay_frames
+        )
+        self.team_assigner = create_team_assigner(self.config.team_assigner)
         self.processor = None  # Will be initialized with FPS
         self.visualizer = Visualizer(self.config.visualizer)
         
@@ -79,22 +83,23 @@ class FootballTracker:
         print("\nStep 2/5: Detecting and tracking objects...")
         detections_per_frame = self._detect_and_track(frames)
         
-        # Step 3: Team Assignment
-        print("\nStep 3/5: Assigning teams...")
-        team_mapping = self.team_assigner.assign_teams(
-            frames,
-            detections_per_frame
-        )
+        # Step 3: Team Assignment with Memory
+        print("\nStep 3/5: Assigning teams with memory...")
+        team_mapping = self._assign_teams_with_memory(frames, detections_per_frame)
         
-        # Step 4: Data Processing
-        print("\nStep 4/5: Processing tracking data...")
+        # Step 4: Assign Goalkeepers to Teams
+        print("\nStep 4/5: Assigning goalkeepers to teams...")
+        team_mapping = self._assign_goalkeepers(detections_per_frame, team_mapping)
+        
+        # Step 5: Data Processing
+        print("\nStep 5/5: Processing tracking data...")
         df, team_mapping = self.processor.process(
             detections_per_frame,
             team_mapping
         )
         
-        # Step 5: Save Results
-        print("\nStep 5/5: Saving results...")
+        # Step 6: Save Results
+        print("\nStep 6/6: Saving results...")
         
         # Save tracking data
         save_tracking_data(df, team_mapping, output_dir, fps)
@@ -170,6 +175,138 @@ class FootballTracker:
         print(f"  Completed all {len(frames)} frames")
         
         return detections_per_frame
+    
+    def _assign_teams_with_memory(
+        self,
+        frames: List[np.ndarray],
+        detections_per_frame: List[Dict]
+    ) -> Dict[int, int]:
+        """
+        Assign teams using the configured method and tracker memory.
+        
+        Args:
+            frames: List of video frames
+            detections_per_frame: List of detection dictionaries
+            
+        Returns:
+            Dictionary mapping player_id -> team_id
+        """
+        # First, run the team assignment algorithm on all frames
+        initial_team_mapping = self.team_assigner.assign_teams(
+            frames,
+            detections_per_frame
+        )
+        
+        # Update tracker memory with initial assignments
+        for player_id, team_id in initial_team_mapping.items():
+            self.tracker.update_team_memory(player_id, team_id)
+        
+        # Now refine with memory-based consensus
+        # For each player, check if we have memory from tracker
+        final_team_mapping = {}
+        
+        for player_id in initial_team_mapping.keys():
+            # Check tracker memory first
+            memory_team = self.tracker.get_team_from_memory(player_id)
+            
+            if memory_team is not None:
+                # Use memory if available
+                final_team_mapping[player_id] = memory_team
+            else:
+                # Use initial assignment
+                final_team_mapping[player_id] = initial_team_mapping[player_id]
+                # Update memory
+                self.tracker.update_team_memory(player_id, initial_team_mapping[player_id])
+        
+        return final_team_mapping
+    
+    def _assign_goalkeepers(
+        self,
+        detections_per_frame: List[Dict],
+        player_team_mapping: Dict[int, int]
+    ) -> Dict[int, int]:
+        """
+        Assign goalkeepers to teams using distance-weighted voting.
+        
+        Args:
+            detections_per_frame: List of detection dictionaries
+            player_team_mapping: Existing player team assignments
+            
+        Returns:
+            Updated team mapping including goalkeepers
+        """
+        # Collect all goalkeeper and player positions across frames
+        goalkeeper_positions = {}  # {gk_id: [(x, y), ...]}
+        player_positions = {}  # {player_id: [(x, y), ...]}
+        
+        for detections in detections_per_frame:
+            # Collect player positions
+            if "Player" in detections:
+                for player_id, detection in detections["Player"].items():
+                    pos = detection["bottom_center"]
+                    if player_id not in player_positions:
+                        player_positions[player_id] = []
+                    player_positions[player_id].append(pos)
+            
+            # Collect goalkeeper positions
+            if "Goalkeeper" in detections:
+                for gk_id, detection in detections["Goalkeeper"].items():
+                    pos = detection["bottom_center"]
+                    if gk_id not in goalkeeper_positions:
+                        goalkeeper_positions[gk_id] = []
+                    goalkeeper_positions[gk_id].append(pos)
+        
+        if not goalkeeper_positions:
+            return player_team_mapping
+        
+        # Average positions for each player and goalkeeper
+        avg_player_positions = {}
+        for player_id, positions in player_positions.items():
+            if player_id in player_team_mapping:
+                avg_player_positions[player_id] = np.mean(positions, axis=0)
+        
+        avg_gk_positions = {}
+        for gk_id, positions in goalkeeper_positions.items():
+            avg_gk_positions[gk_id] = np.mean(positions, axis=0)
+        
+        if not avg_player_positions or not avg_gk_positions:
+            return player_team_mapping
+        
+        # Prepare arrays for distance calculation
+        player_ids = list(avg_player_positions.keys())
+        players_xy = np.array([avg_player_positions[pid] for pid in player_ids])
+        players_team_id = np.array([player_team_mapping[pid] for pid in player_ids])
+        
+        gk_ids = list(avg_gk_positions.keys())
+        goalkeepers_xy = np.array([avg_gk_positions[gid] for gid in gk_ids])
+        
+        # Assign goalkeeper teams
+        gk_teams = resolve_goalkeepers_team_id(
+            players_xy,
+            players_team_id,
+            goalkeepers_xy
+        )
+        
+        # Update team mapping
+        goalkeeper_team_mapping = {
+            gk_ids[i]: gk_teams[i]
+            for i in range(len(gk_ids))
+        }
+        
+        # Update tracker memory for goalkeepers
+        for gk_id, team_id in goalkeeper_team_mapping.items():
+            self.tracker.update_team_memory(gk_id, team_id)
+        
+        # Combine with player mapping
+        combined_mapping = {**player_team_mapping, **goalkeeper_team_mapping}
+        
+        print(f"Assigned {len(goalkeeper_team_mapping)} goalkeepers to teams")
+        for team_id in [0, 1]:
+            count = sum(1 for t in goalkeeper_team_mapping.values() if t == team_id)
+            if count > 0:
+                print(f"  Team {team_id}: {count} goalkeeper(s)")
+        
+        return combined_mapping
 
 
 def main():
@@ -217,6 +354,14 @@ def main():
     )
     
     parser.add_argument(
+        "--team-method",
+        type=str,
+        choices=["color", "embedding"],
+        default="color",
+        help="Team assignment method: color-based or embedding-based"
+    )
+    
+    parser.add_argument(
         "--no-gpu",
         action="store_true",
         help="Force CPU usage even if GPU is available"
@@ -228,6 +373,13 @@ def main():
         help="Show bounding boxes in annotated video"
     )
     
+    parser.add_argument(
+        "--memory-decay",
+        type=int,
+        default=150,
+        help="Frames before forgetting team assignment (default: 150)"
+    )
+    
     args = parser.parse_args()
     
     # Create configuration
@@ -237,9 +389,14 @@ def main():
     config.detector.confidence_threshold = args.detector_conf
     config.visualizer.show_bboxes = args.show_bboxes
     
+    # Team assignment configuration
+    config.team_assigner.team_method = args.team_method
+    config.team_assigner.memory_decay_frames = args.memory_decay
+    
     if args.no_gpu:
         config.detector.device = "cpu"
         config.tracker.device = "cpu"
+        config.team_assigner.device = "cpu"
     
     # Create tracker and process video
     try:
