@@ -14,10 +14,21 @@ class DetectorConfig:
     confidence_threshold: float = 0.35
     low_confidence_threshold: float = 0.15  # For robust tracking
     device: Optional[str] = None  # Auto-detect if None
+    class_names: Optional[dict] = None  # Custom class mapping {index: name}
     
     def __post_init__(self):
         if self.device is None:
             self.device = self._get_device()
+        
+        # Set default class names if not provided
+        if self.class_names is None:
+            self.class_names = {
+                0: "Player",
+                1: "Goalkeeper", 
+                2: "Ball",
+                3: "Referee",
+                4: "Staff"
+            }
     
     @staticmethod
     def _get_device() -> str:

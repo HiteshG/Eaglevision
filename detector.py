@@ -16,14 +16,6 @@ class ObjectDetector:
     Can be easily replaced with other detection models.
     """
     
-    # Class mapping from YOLO model
-    CLASS_NAMES = {
-        0: "Player",
-        1: "Goalkeeper", 
-        2: "Ball",
-        3: "Referee",
-        4: "Staff"
-    }
     
     # Classes we care about
     TRACK_CLASSES = ["Player", "Goalkeeper"]
@@ -44,6 +36,7 @@ class ObjectDetector:
             self.model.to(config.device)
         
         self.device = config.device
+        self.CLASS_NAMES = config.class_names
         
     def detect(self, frame: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
