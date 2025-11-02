@@ -7,7 +7,7 @@ import numpy as np
 from boxmot import BotSort
 from pathlib import Path
 from typing import Dict, List, Tuple
-from .config import TrackerConfig
+from config import TrackerConfig
 
 
 class ObjectTracker:

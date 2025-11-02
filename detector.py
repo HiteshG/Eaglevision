@@ -7,7 +7,7 @@ import torch
 import numpy as np
 from ultralytics import YOLO
 from typing import Dict, List, Tuple
-from .config import DetectorConfig
+from config import DetectorConfig
 
 
 class ObjectDetector:

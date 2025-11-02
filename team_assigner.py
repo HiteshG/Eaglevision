@@ -8,7 +8,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from collections import Counter
 from typing import Dict, List, Tuple
-from .config import TeamAssignerConfig
+from config import TeamAssignerConfig
 
 
 class TeamAssigner:

@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import math
 from typing import Dict, List, Tuple
-from .config import ProcessorConfig
+from config import ProcessorConfig
 
 
 class DataProcessor:

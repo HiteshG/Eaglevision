@@ -15,7 +15,7 @@ Components:
 __version__ = "1.0.0"
 __author__ = "Football Tracker Team"
 
-from .config import (
+from config import (
     MainConfig,
     DetectorConfig,
     TrackerConfig,
