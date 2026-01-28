@@ -54,6 +54,10 @@ class TrackerConfig:
     new_track_thresh: float = 0.6  # Threshold for creating new tracks
     track_buffer: int = 30  # Frames to keep lost tracks (lower = fewer ghost tracks)
     match_thresh: float = 0.8  # IoU threshold for matching
+    # Ghost track filtering - only output tracks that matched a detection this frame
+    filter_unmatched: bool = True  # Filter out tracks without current detection match
+    proximity_thresh: float = 0.5  # IoU threshold for ReID proximity masking
+    appearance_thresh: float = 0.25  # Appearance embedding distance threshold
 
     def __post_init__(self):
         if self.device is None:
