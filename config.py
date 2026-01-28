@@ -46,7 +46,15 @@ class TrackerConfig:
     tracker_type: str = "botsort"  # Can be changed to: bytetrack, strongsort, etc.
     reid_weights: str = "osnet_x0_25_msmt17.pt"
     device: Optional[str] = None
-    
+    # Camera Motion Compensation settings
+    cmc_method: Optional[str] = "orb"  # Options: "orb", "ecc", "sof", "sparseOptFlow", None (disabled)
+    # Track management settings to reduce ghost tracks
+    track_high_thresh: float = 0.5  # High confidence threshold for first association
+    track_low_thresh: float = 0.1  # Low confidence threshold for second association
+    new_track_thresh: float = 0.6  # Threshold for creating new tracks
+    track_buffer: int = 30  # Frames to keep lost tracks (lower = fewer ghost tracks)
+    match_thresh: float = 0.8  # IoU threshold for matching
+
     def __post_init__(self):
         if self.device is None:
             # BoTSORT doesn't support MPS, use CPU fallback

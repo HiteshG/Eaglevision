@@ -227,7 +227,29 @@ def main():
         action="store_true",
         help="Show bounding boxes in annotated video"
     )
-    
+
+    parser.add_argument(
+        "--cmc-method",
+        type=str,
+        default="orb",
+        choices=["orb", "ecc", "sof", "sparseOptFlow", "none"],
+        help="Camera Motion Compensation method (orb, ecc, sof, sparseOptFlow, none)"
+    )
+
+    parser.add_argument(
+        "--track-buffer",
+        type=int,
+        default=30,
+        help="Frames to keep lost tracks (lower = fewer ghost tracks)"
+    )
+
+    parser.add_argument(
+        "--new-track-thresh",
+        type=float,
+        default=0.6,
+        help="Confidence threshold for creating new tracks (higher = fewer false tracks)"
+    )
+
     args = parser.parse_args()
     
     # Create configuration
@@ -236,7 +258,12 @@ def main():
     config.detector.model_path = args.model
     config.detector.confidence_threshold = args.detector_conf
     config.visualizer.show_bboxes = args.show_bboxes
-    
+
+    # Camera Motion Compensation settings
+    config.tracker.cmc_method = args.cmc_method if args.cmc_method != "none" else None
+    config.tracker.track_buffer = args.track_buffer
+    config.tracker.new_track_thresh = args.new_track_thresh
+
     if args.no_gpu:
         config.detector.device = "cpu"
         config.tracker.device = "cpu"

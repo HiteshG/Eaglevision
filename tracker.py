@@ -19,13 +19,14 @@ class ObjectTracker:
     def __init__(self, config: TrackerConfig):
         """
         Initialize tracker with configuration.
-        
+
         Args:
             config: TrackerConfig object with tracker settings
         """
         self.config = config
-        print(f"Loading tracker: {config.tracker_type} on device: {config.device}")
-        
+        cmc_status = f"CMC: {config.cmc_method}" if config.cmc_method else "CMC: disabled"
+        print(f"Loading tracker: {config.tracker_type} on device: {config.device} ({cmc_status})")
+
         # Convert device string to format expected by boxmot
         if config.device == "cuda":
             device = 0
@@ -33,12 +34,20 @@ class ObjectTracker:
             device = "cpu"  # BoTSORT doesn't support MPS
         else:
             device = config.device
-            
-        # Initialize BoTSORT
+
+        # Initialize BoTSORT with CMC and track management parameters
         self.tracker = BotSort(
             reid_weights=Path(config.reid_weights),
             device=device,
-            half=False
+            half=False,
+            # Camera Motion Compensation
+            cmc_method=config.cmc_method if config.cmc_method else None,
+            # Track management parameters to reduce ghost tracks
+            track_high_thresh=config.track_high_thresh,
+            track_low_thresh=config.track_low_thresh,
+            new_track_thresh=config.new_track_thresh,
+            track_buffer=config.track_buffer,
+            match_thresh=config.match_thresh,
         )
         
     def update(
@@ -130,10 +139,19 @@ class ObjectTracker:
     
     def reset(self):
         """Reset tracker state."""
+        device = self.config.device if self.config.device != "mps" else "cpu"
+        if device == "cuda":
+            device = 0
         self.tracker = BotSort(
             reid_weights=Path(self.config.reid_weights),
-            device=self.config.device if self.config.device != "mps" else "cpu",
-            half=False
+            device=device,
+            half=False,
+            cmc_method=self.config.cmc_method if self.config.cmc_method else None,
+            track_high_thresh=self.config.track_high_thresh,
+            track_low_thresh=self.config.track_low_thresh,
+            new_track_thresh=self.config.new_track_thresh,
+            track_buffer=self.config.track_buffer,
+            match_thresh=self.config.match_thresh,
         )
     
     def __repr__(self):
