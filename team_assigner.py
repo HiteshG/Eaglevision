@@ -56,7 +56,7 @@ class TeamAssigner:
             
             for player_id, detection in players.items():
                 bbox = detection["bbox"]
-                x1, y1, x2, y2 = bbox
+                x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
                 
                 # Calculate overlap with other detections
                 overlap_ratio = self._calculate_max_overlap_ratio(
